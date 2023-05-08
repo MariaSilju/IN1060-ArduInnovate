@@ -1,3 +1,4 @@
+//Kode
 //av og på knapp funksjon
 volatile boolean skruddPaa = true;
 int PAA_KNAPP = 8;
