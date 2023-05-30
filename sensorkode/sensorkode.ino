@@ -3,33 +3,31 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
 #include <String.h>
-#define PIN_CLK  2
-#define PIN_CE 5
-#define PIN_DIN 3
-#define PIN_DC   4
-#define PIN_RST  6
+#define PIN_CLK  7
+#define PIN_CE 10
+#define PIN_DIN 8
+#define PIN_DC   9
+#define PIN_RST  11
 
 // Adafruit_PCD8544(CLK,DIN,D/C,CE,RST);
 Adafruit_PCD8544 display = Adafruit_PCD8544(PIN_CLK, PIN_DIN, PIN_DC, PIN_CE, PIN_RST);
 
 //Shift register 1 pins
-int LATCH_PIN = 5;      // Latch pin of 74HC595 is connected to Digital pin 5
-int CLOCK_PIN = 6;      // Clock pin of 74HC595 is connected to Digital pin 6
-int DATA_PIN = 4;       // Data pin of 74HC595 is connected to Digital pin 4
+int LATCH_PIN = 5;      // Latch pin of 74HC595 er koblet til digital pinne 5
+int CLOCK_PIN = 6;      // Clock pin of 74HC595 er koblet til digital pinne 6
+int DATA_PIN = 4;      // Data pin of 74HC595 er koblet til digital pinne 4
 
-//hvilke lys som er på og hvilke av
-byte register1 = 00000000; // Variable to hold the pattern of which LEDs are currently turned on or off
-byte registre[] = {register1, };
+//hvilke lys som er på og hvilke av, hver bit representerer en output-pin i shiftregisteret
+byte register1 = 00000000;
+//array over alle shiftregisterene i bruk
+byte registre[] = {register1};
 int registerIndeks = 0;
-int antRegistre = 3;
+int antRegistre = 1;
 
-int sensorInn = 11; // Pin connected to the motion sensor
-int sensorUt = 10;
-int led1 = 12;   // Pin connected to the LED
-int led2 = 13;
-int myLeds[] = {led1, led2};
-int len = sizeof(myLeds) / sizeof(myLeds[0]);
+int sensorInn = 13; // Pir bevegelsessensor koblet til pinne 13 
+int sensorUt = 12;
 int ledIndeks = 0;
+int antallNaa = 0;
 int innMillis = 0;
 int utMillis = 0;
 boolean sensorInnTrigget = false;
@@ -47,22 +45,25 @@ pinMode(CLOCK_PIN, OUTPUT);
   //Oppsett av sensorene
   pinMode(sensorInn, INPUT);
   pinMode(sensorUt, INPUT);
-  //Oppsett av LED-lys
-  pinMode(led1, OUTPUT);
-  pinMode(led2, OUTPUT);
   Serial.begin(9600);
   Serial.print("Program start");
 
 	display.begin();
 	display.setContrast(57); // 57 setter sterkest farge
+
+  updateShiftRegister();
+
+  delay(10000);
+  Serial.println("FERDIG MED KALIBRERING");
 }
 
 void loop() {
   
+  delay(200);
   sjekkSensorer(); // Sjekker om baade sensor 1 eller sensor 2 har blitt aktivert
   settAntallLys(); // Hvis begge sensorene har blitt aktivert oeker eller reduseres antall lys i kongehuset
   
-  Serial.println(ledIndeks);
+  Serial.println(antallNaa);
   Serial.println("totalt: ");
   Serial.println(totaltAntBesokende);
   Serial.println("Naa: ");
@@ -100,37 +101,39 @@ void settAntallLys(){
   // Dersom begge senorene har blitt trigget sjekkes det hvilken som ble trigget forst
   // dette viser om personen kom eller dro
 
-  if (sensorInnTrigget && sensor2Trigget){
-
-
-    if(innMillis < utMillis && (registerIndeks < antRegistre || ledIndeks < 7)) {
+  if (sensorInnTrigget && sensor2Trigget) {
+    //dersom innMillis < utMillis har noen kommet inn. Gaar bare inn i kodeblokk om ikke alle lysene allerede er paa
+    if(innMillis < utMillis && (registerIndeks < antRegistre && ledIndeks <= 7)) {
+      Serial.println("SKAL LEGGE TIL LYS");
       bitSet(registre[registerIndeks], ledIndeks);
       updateShiftRegister();
       ledIndeks++;
-      totaltAntBesokende ++;
-      //Invariant: helt til slutt når siste lys er skrudd på, er ledIndeks 0 og registerIndeks 4;
+      antallNaa++;
+      totaltAntBesokende++;
+      //når man når det åttende lyset på et shiftregister går man videre til neste shiftregister sitt forste lys
       if (ledIndeks > 7) {
-        ledIndeks = 0;
-        registerIndeks++;
-        if (registerIndeks > antRegistre) {
-            registerIndeks--;
+        if (registerIndeks < antRegistre - 1) {
+          ledIndeks = 0;
+          registerIndeks++;
         }
       } 
       
+      
     }
 
-    // Gaar bare inn i kodeblokk om man ikke er paa register 0 og indeks 0 samtidig
+    // Dersom innMillis > utMillis har noen gått ut. Gaar bare inn i kodeblokk om man ikke er paa register 0 og indeks 0 samtidig
     else if (innMillis > utMillis && (registerIndeks > 0 || ledIndeks > 0)){
       if(ledIndeks == 0 && registerIndeks > 0) {
         ledIndeks = 7;
+        //biten (i byten til det gjeldende shiftregistret) som styrer det sist tente lyset settes til 0
         bitClear(registre[--registerIndeks], ledIndeks);
         updateShiftRegister();
         
       }
       else{
-          bitClear(registre[registerIndeks], ledIndeks);
+          bitClear(registre[registerIndeks], --ledIndeks);
           updateShiftRegister();
-          ledIndeks--;
+          antallNaa--;
       }
 
       
@@ -141,6 +144,10 @@ void settAntallLys(){
   }
 }
 
+
+
+
+
 void ventSkjerm() {
   //skriver 'wait...' på skjermen med en dynamisk skrift, så lenge sensorene er i cooldown-modus
   String wait[] = {"Wait", "Wait.", "Wait..", "Wait..."};
@@ -149,6 +156,7 @@ void ventSkjerm() {
     
       delay(200);
       display.clearDisplay();
+      display.setRotation(2);
       display.setTextSize(2);
       display.setTextColor(BLACK);
       display.setCursor(0,20);
@@ -171,25 +179,30 @@ void ventSkjerm() {
     }
 }
 
+//faar de gjeldende tallene for navarende besøkende og totalt antall til å vises på skjermen
 void visStatus() {
   delay(200);
   display.clearDisplay();
+  display.setRotation(2);
   display.setTextSize(4);
 	display.setTextColor(BLACK);
 	display.setCursor(0,10);
-  display.print(String(ledIndeks) + "/" + String(totaltAntBesokende));
+  display.print(String(antallNaa) + "/" + String(totaltAntBesokende));
   display.display();
 }
 
+
   /*
- * updateShiftRegister() - This function sets the latchPin 
- to low, then calls the Arduino function 'shiftOut' to shift out contents of variable 'leds' 
- in the shift register before putting the 'latchPin' high again.
+ * updateShiftRegister() - Denne funksjonen setter latchPin til lav, 
+   deretter kaller den Arduino-funksjonen 'shiftOut' for å skifte ut innholdet i variabelen 'leds' i skiftregisteret 
+   før den setter 'latchPin' til høy igjen.
+
+   Akkurat denne metoden er tatt fra arduino.cc, tilpasset våre behov blant annet ved å endre argumentene fra LSBFIRST til MSBFIRST
  */
   
   void updateShiftRegister()
 {
    digitalWrite(LATCH_PIN, LOW);
-   shiftOut(DATA_PIN, CLOCK_PIN, LSBFIRST, registre[registerIndeks]);
+   shiftOut(DATA_PIN, CLOCK_PIN, MSBFIRST, registre[registerIndeks]);
    digitalWrite(LATCH_PIN, HIGH);
 }
